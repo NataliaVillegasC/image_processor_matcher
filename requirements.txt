@@ -1,0 +1,6 @@
+pandas
+openpyxl
+Pillow
+requests
+ddgs
+flask

@@ -1,0 +1,6 @@
+
+# Excel files
+*.xlsx
+
+# Virtual environment
+venv/

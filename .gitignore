@@ -5,5 +5,8 @@
 # Virtual environment
 venv/
 
-# Environment files
-.env
+# local Environment files
+*.env
+*.env.*
+*.env_*
+.env_*

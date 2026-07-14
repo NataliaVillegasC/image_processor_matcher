@@ -10,12 +10,11 @@ from config.categories import CATEGORIAS, OTROS, Categoria
 
 
 def _kw_pattern(keyword: str) -> re.Pattern:
-    """Letter-boundary match: the keyword must not be glued to another LETTER,
-    but digits are allowed to touch it. That way `RIN` does not match inside
-    `REJILLA`, while `10W` still matches inside `10W30` (W is followed by a
-    digit, not a letter). Spaces in multi-word keywords are matched literally.
+    """Prefix match at a word start: the keyword must not be glued to a LETTER
+    on its LEFT, but it CAN be followed by more letters. Multi-word keywords match their
+    spaces literally.
     """
-    return re.compile(rf"(?<![A-Za-z]){re.escape(keyword)}(?![A-Za-z])")
+    return re.compile(rf"(?<![A-Za-z]){re.escape(keyword)}")
 
 
 # Precompile every keyword once: [(Categoria, [compiled patterns]), ...]

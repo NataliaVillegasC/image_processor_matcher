@@ -43,6 +43,12 @@ CATEGORIAS: list[Categoria] = [
         presentacion="producto solo sobre fondo limpio, sin modelo humano de preferencia",
     ),
     Categoria(
+        "accesorios",
+        keywords=["TAPETE", "TAPIZ"],
+        cse_profile="baseline",
+        presentacion="accesorio individual (tapete/tapiz) mostrado plano o de frente, sin vehiculo",
+    ),
+    Categoria(
         "emblemas",
         keywords=["MONOGRAMA", "EMBLEMA"],
         cse_profile="exact_brand",
@@ -57,7 +63,7 @@ CATEGORIAS: list[Categoria] = [
     Categoria(
         "frenos",
         keywords=["PASTILLA", "PLAQUETA", "BANDAS FRENO", "DISCO FRENO",
-                "DISC FRENO", "CAMPANA FRENO", "DISC"],
+                "DISC FRENO", "CAMPANA", "DISC", "FRENO"],
         cse_profile="baseline",
         presentacion="cuenta las pastillas y verifica el eje segun el nombre. Si el nombre dice un eje (delanteras/delantero o traseras/trasero): mostrar 2 pastillas de ESE eje (aceptable 1), NUNCA el set de 4. Si el nombre NO especifica eje ni cantidad (solo 'pastillas de freno'): aceptable 1 o el set de 4",
     ),

@@ -13,3 +13,6 @@ venv/
 
 # Credentials
 credentials.json
+
+# CSE / image cache (raw API responses + downloaded images)
+cache/

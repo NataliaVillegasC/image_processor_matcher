@@ -4,3 +4,7 @@ Pillow
 requests
 ddgs
 flask
+python-dotenv
+numpy
+imagehash
+google-genai

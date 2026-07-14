@@ -12,7 +12,7 @@ def build_query(row: pd.Series) -> str:
     """
     ref = row[config.COL_REF]
     brand = row[config.COL_BRAND]
-    return f'"{ref}" "{brand}" product white background'
+    return f'"{ref}" "{brand}"'
 
 
 def build_fallback_query(row: pd.Series) -> str:

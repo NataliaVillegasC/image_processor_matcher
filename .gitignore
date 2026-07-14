@@ -10,3 +10,6 @@ venv/
 *.env.*
 *.env_*
 .env_*
+
+# Credentials
+credentials.json

@@ -84,7 +84,7 @@ CATEGORIAS: list[Categoria] = [
     Categoria(
         "lubricantes",
         keywords=["ACEITE", "CASTROL", "10W", "15W", "5W", "20W", "80W", "0W"],
-        cse_profile="white_dominant",
+        cse_profile="baseline",
         presentacion="envase individual del litraje indicado; el empaque ES el producto (una botella, no multipack)",
     ),
     Categoria(

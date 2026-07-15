@@ -130,7 +130,7 @@ def get_pool(row, target: int = 20) -> dict:
     return {"ref": str(row["Ref Proveedor"]), **meta, "candidates": pool[:target]}
 
 # %% ------------------------------------------------- 5. run extraction
-df = load_parts("/Users/nataliavillegas/Documents/FUTURE/DONREP/image_processor_matcher/productos_renault.xlsx")
+df = load_parts("/Users/nataliavillegas/Documents/FUTURE/DONREP/image_processor_matcher/input/products.xlsx")
 pools = [get_pool(row) for _, row in df.head(10).iterrows()]
 POOL_FILE.write_text(json.dumps(pools, ensure_ascii=False, indent=1))
 
@@ -315,7 +315,7 @@ def validate_winner(pool):
     return pool
 
 # %% ------------------------------------------- full run example
-df = load_parts("/Users/nataliavillegas/Documents/FUTURE/DONREP/image_processor_matcher/productos_renault.xlsx")
+df = load_parts("/Users/nataliavillegas/Documents/FUTURE/DONREP/image_processor_matcher/input/products.xlsx")
 results = []
 for _, row in df.head(10).iterrows():
     p = get_pool(row)

@@ -1,8 +1,11 @@
 """Etapa 3 - Google Custom Search (CSE) image search, with disk cache.
 
 One call per product to control cost. The RAW CSE response is always saved to
-`cache/cse/{ref}/rung{n}.json` so re-runs of the rest of the pipeline cost zero
-(the single most important cost decision of the MVP - see plan.md Etapa 3).
+`cache/cse/{ref}/rung{n}_{profile}[_geo].json` so re-runs of the rest of the
+pipeline cost zero (the single most important cost decision of the MVP - see
+plan.md Etapa 3). The filename encodes profile/geo because they change the
+actual API params sent - without that, switching either would silently serve
+a cached response fetched under different params.
 
 Rung 1 (`"{ref}" "{marca}"`, both quoted) is the default and the most precise
 query: it's the proven builder. The lower rungs of the fallback ladder are
@@ -24,8 +27,9 @@ load_dotenv()
 CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "cse"
 
-# Market bias: Colombia / Spanish. Probar con y sin (plan.md): puede ayudar con
-# marcas locales tipo MOTRIO y estorbar con productos globales.
+# Market bias: Colombia / Spanish. Off by default (plan.md): probado con
+# "8550504748" "MOTRIO" -> 0 resultados con gl=co&hl=es, 7 sin geo. Se deja
+# como opt-in (geo=True) para volver a probarlo caso por caso.
 GEO_PARAMS = {"gl": "co", "hl": "es"}
 
 # Una sola clave para el MVP.
@@ -38,18 +42,18 @@ _CX = os.getenv("GOOGLE_CSE_CX", "")
 # step (most precise -> most lax) and are called by the escalation logic later.
 
 def query_rung1(ref: str, marca: str, **_) -> str:
-    """`"{ref}" "{marca}"` - both quoted, literal. Most precise. The proven default."""
+    """`"{ref}" "{marca}"` -> both quoted, literal. Most precise. The proven default."""
     return f'"{ref}" "{marca}"'
 
 
 def query_rung2(ref: str, marca: str, **_) -> str:
-    """`{ref} {marca}` - unquoted. Rescues brands written differently (motrio,
+    """`{ref} {marca}` -> unquoted. Rescues brands written differently (motrio,
     "Motrio by Renault") that the exact-phrase rung 1 would miss."""
     return f"{ref} {marca}"
 
 
 def query_rung3(nombre_limpio: str, **_) -> str:
-    """The clean product name - descriptive fallback when ref-based rungs fail."""
+    """The clean product name -> descriptive fallback when ref-based rungs fail."""
     return nombre_limpio
 
 
@@ -57,12 +61,13 @@ QUERY_RUNGS = {1: query_rung1, 2: query_rung2, 3: query_rung3}
 
 
 # --- CSE profile -> image params -------------------------------------------
-# Every profile shares the photo/large base (we want real product photos, not
-# clip-art or tiny thumbnails). Each category's cse_profile (validated
-# empirically) then adds its own bias on top. `exact_brand` needs the brand at
-# call time, so it's applied in _profile_params.
+# baseline stays minimal on purpose: imgType=photo (set unconditionally in
+# cse_image_search) and the literal query, nothing else - imgSize=large was
+# cutting results (see GEO_PARAMS note above for the same lesson with geo).
+# Each category's cse_profile then adds its own bias on top of that minimal
+# base. `exact_brand` needs the brand at call time, so it's applied here.
 
-BASE_IMG_PARAMS = {"imgType": "photo", "imgSize": "large"}
+BASE_IMG_PARAMS = {}
 
 
 def _profile_params(profile: str, marca: str) -> dict:
@@ -82,14 +87,18 @@ def _safe(ref: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", str(ref).strip()) or "unknown"
 
 
-def _cache_path(ref: str, rung: int) -> Path:
-    return CACHE_DIR / _safe(ref) / f"rung{rung}.json"
+def _cache_path(ref: str, rung: int, profile: str = "baseline", geo: bool = False) -> Path:
+    """profile/geo are part of the key because they change the actual API
+    params sent - otherwise switching either would silently serve a response
+    that was fetched under different params (see module docstring)."""
+    suffix = "_geo" if geo else ""
+    return CACHE_DIR / _safe(ref) / f"rung{rung}_{profile}{suffix}.json"
 
 
 # --- Raw CSE call with retry/backoff ---------------------------------------
 
 def cse_image_search(query: str, profile: str = "baseline", marca: str = "",
-                    num: int = 10, geo: bool = True,
+                    num: int = 10, geo: bool = False,
                     max_retries: int = 4) -> dict:
     """One raw CSE image search. Returns the parsed JSON dict.
 
@@ -107,6 +116,7 @@ def cse_image_search(query: str, profile: str = "baseline", marca: str = "",
         "q": query,
         "searchType": "image",
         "num": num,
+        "imgType": "photo",
         **(GEO_PARAMS if geo else {}),
         **_profile_params(profile, marca),
     }
@@ -164,13 +174,13 @@ def candidates_from_response(raw: dict) -> list[dict]:
 
 def search_product(ref: str, marca: str, profile: str = "baseline",
                 nombre_limpio: str = "", rung: int = 1,
-                use_cache: bool = True, geo: bool = True) -> list[dict]:
+                use_cache: bool = True, geo: bool = False) -> list[dict]:
     """Cached CSE search for one product at a given rung.
 
-    Reads `cache/cse/{ref}/rung{n}.json` if present; otherwise calls the API
-    and writes the RAW response there. Returns parsed candidates.
+    Reads `cache/cse/{ref}/rung{n}_{profile}[_geo].json` if present; otherwise
+    calls the API and writes the RAW response there. Returns parsed candidates.
     """
-    path = _cache_path(ref, rung)
+    path = _cache_path(ref, rung, profile, geo)
     if use_cache and path.exists():
         raw = json.loads(path.read_text())
         return candidates_from_response(raw)
@@ -185,7 +195,7 @@ def search_product(ref: str, marca: str, profile: str = "baseline",
 
 def search_df(df, col_ref: str = "Ref Proveedor", col_marca: str = "Marca",
             col_profile: str = "cse_profile", col_nombre: str = "nombre_limpio",
-            rung: int = 1, use_cache: bool = True, geo: bool = True,
+            rung: int = 1, use_cache: bool = True, geo: bool = False,
             sleep: float = 0.5, max_queries: int = 40) -> dict[str, list[dict]]:
     """Run search_product over every row (use on the golden set first).
 
@@ -199,7 +209,8 @@ def search_df(df, col_ref: str = "Ref Proveedor", col_marca: str = "Marca",
     n_skipped = 0
     for _, row in df.iterrows():
         ref = row[col_ref]
-        cached = use_cache and _cache_path(ref, rung).exists()
+        profile = row.get(col_profile, "baseline")
+        cached = use_cache and _cache_path(ref, rung, profile, geo).exists()
 
         if not cached and n_calls >= max_queries:
             n_skipped += 1
@@ -208,7 +219,7 @@ def search_df(df, col_ref: str = "Ref Proveedor", col_marca: str = "Marca",
         results[ref] = search_product(
             ref=ref,
             marca=row[col_marca],
-            profile=row.get(col_profile, "baseline"),
+            profile=profile,
             nombre_limpio=row.get(col_nombre, ""),
             rung=rung,
             use_cache=use_cache,

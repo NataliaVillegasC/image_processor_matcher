@@ -65,7 +65,7 @@ CATEGORIAS: list[Categoria] = [
         keywords=["PASTILLA", "PLAQUETA", "BANDAS FRENO", "DISCO FRENO",
                 "DISC FRENO", "CAMPANA", "DISC", "FRENO"],
         cse_profile="baseline",
-        presentacion="cuenta las pastillas y verifica el eje segun el nombre. Si el nombre dice un eje (delanteras/delantero o traseras/trasero): mostrar 2 pastillas de ESE eje (aceptable 1), NUNCA el set de 4. Si el nombre NO especifica eje ni cantidad (solo 'pastillas de freno'): aceptable 1 o el set de 4",
+        presentacion="Si son PASTILLAS: cuenta las pastillas y verifica el eje segun el nombre. Si el nombre dice un eje (delanteras/delantero o traseras/trasero): mostrar 2 pastillas de ESE eje (aceptable 1), NUNCA el set de 4. Si el nombre NO especifica eje ni cantidad (solo 'pastillas de freno'): aceptable 1 o el set de 4. Si son BANDAS/ZAPATAS de freno: el juego comercial de un eje trae 4 zapatas, asi que son aceptables 1, 2 o 4 unidades; NO descartes por cantidad si son bandas del tipo correcto (pero un tambor o campana NO es una banda)",
     ),
     Categoria(
         "motor_transmision",
@@ -85,7 +85,7 @@ CATEGORIAS: list[Categoria] = [
         "lubricantes",
         keywords=["ACEITE", "CASTROL", "10W", "15W", "5W", "20W", "80W", "0W"],
         cse_profile="baseline",
-        presentacion="envase individual del litraje indicado; el empaque ES el producto (una botella, no multipack)",
+        presentacion="envase individual del litraje indicado; el empaque ES el producto (una botella, no multipack). Acepta equivalencias comerciales de litraje: un cuarto de galon (0.946L / 946ml / quart) CUENTA como 1L y viceversa; descarta por litraje solo si el tamano es claramente otro (p.ej. galon o 4L cuando se pide 1L)",
     ),
     Categoria(
         "llantas_rines",

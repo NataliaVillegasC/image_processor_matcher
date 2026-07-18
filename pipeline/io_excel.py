@@ -18,6 +18,8 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.utils import get_column_letter
 from PIL import Image as PILImage
 
+from pipeline.select import FETCH_HEADERS
+
 IMG_DIR = Path(__file__).resolve().parent.parent / "output" / "images"
 THUMB_SIDE = 120  # px, embedded thumbnail size in the sheet
 
@@ -33,21 +35,29 @@ def _image_path(ref: str) -> Path:
 
 
 def download_selected_image(ref: str, url: str, timeout: int = 15,
-                        use_cache: bool = True) -> Path | None:
+                        use_cache: bool = True, fallback_url: str = "") -> Path | None:
     """Save the winning image to disk (output/images/{ref}.jpg).
 
-    Returns the path, or None if the download fails (dead link, blocked
-    hotlinking) - the row then keeps `imagen_url` but `imagen_local`/
+    Tries `url` (the original) and then `fallback_url` (Google's cached
+    thumbnail, low-res but never hotlink-blocked). Returns the path, or None
+    if both fail - the row then keeps `imagen_url` but `imagen_local`/
     `miniatura` stay empty for that product.
     """
     path = _image_path(ref)
     if use_cache and path.exists():
         return path
-    try:
-        resp = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
-        resp.raise_for_status()
-        img = PILImage.open(BytesIO(resp.content)).convert("RGB")
-    except Exception:
+    img = None
+    for u in (url, fallback_url):
+        if not u:
+            continue
+        try:
+            resp = requests.get(u, timeout=timeout, headers=FETCH_HEADERS)
+            resp.raise_for_status()
+            img = PILImage.open(BytesIO(resp.content)).convert("RGB")
+            break
+        except Exception:
+            continue
+    if img is None:
         return None
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +87,10 @@ def build_output_df(df: pd.DataFrame, seleccionados: dict[str, dict],
 
         local = None
         if url and download_images:
-            local = download_selected_image(ref, url, use_cache=use_cache)
+            local = download_selected_image(
+                ref, url, use_cache=use_cache,
+                fallback_url=sel.get("thumbnailLink", "") if sel else "",
+            )
 
         rows.append({
             "imagen_url": url,

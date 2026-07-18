@@ -144,13 +144,28 @@ SELECT_SCHEMA = types.Schema(
 
 # --- Image fetch (full-size, in memory only) --------------------------------
 
+# Headers of a real browser: many stores answer 403 to anything that looks
+# like a bot, even though the same image loads fine in Chrome.
+FETCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Accept-Language": "es-CO,es;q=0.9,en;q=0.8",
+    "Referer": "https://www.google.com/",
+}
+
+
 def fetch_full_image(url: str, timeout: int = 15, max_side: int = MAX_SIDE,
                     quality: int = JPEG_QUALITY) -> bytes | None:
     """Download+re-encode one candidate's full image as JPEG, longest side
     capped at `max_side`. Returns None on any failure (dead link, blocked
     hotlinking, corrupt image) -> the caller drops that candidate."""
+    if not url:
+        return None
     try:
-        resp = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=timeout, headers=FETCH_HEADERS)
         resp.raise_for_status()
         img = Image.open(BytesIO(resp.content)).convert("RGB")
     except Exception:
@@ -284,13 +299,20 @@ def select_product(ref: str, nombre_limpio: str, marca: str, categoria: str,
     if not candidates:
         result = _sin_candidatos("pool vacio tras el pre-filtro")
     else:
-        images, usable = [], []
+        images, usable, via_thumb = [], [], []
         for c in candidates:
             img_bytes = fetch_full_image(c.get("link", ""))
+            # Original blocked (hotlink protection) -> Google's cached
+            # thumbnail still works; low-res but enough for Gemini to judge.
+            from_thumb = False
+            if img_bytes is None:
+                img_bytes = fetch_full_image(c.get("thumbnailLink", ""))
+                from_thumb = img_bytes is not None
             if img_bytes is None:
                 continue
             images.append(img_bytes)
             usable.append(c)
+            via_thumb.append(from_thumb)
 
         if not usable:
             result = _sin_candidatos("ninguna imagen del pool se pudo descargar")
@@ -301,6 +323,9 @@ def select_product(ref: str, nombre_limpio: str, marca: str, categoria: str,
             ]
             raw = _generate_with_retry(parts, model=model)
             result = _postprocess(raw, usable)
+            sel_n = result.get("seleccion_imagen")
+            if sel_n is not None and via_thumb[sel_n - 1]:
+                result["flags"].append("descarga_thumbnail")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2))

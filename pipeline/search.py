@@ -22,6 +22,8 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+from pipeline import metrics
+
 load_dotenv()
 
 CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
@@ -99,11 +101,15 @@ def _cache_path(ref: str, rung: int, profile: str = "baseline", geo: bool = Fals
 
 def cse_image_search(query: str, profile: str = "baseline", marca: str = "",
                     num: int = 10, geo: bool = False,
-                    max_retries: int = 4) -> dict:
+                    max_retries: int = 4, ref: str = "") -> dict:
     """One raw CSE image search. Returns the parsed JSON dict.
 
     Backs off and retries on transient 5xx. Fails fast on quota/forbidden
     (429/403). Raises RuntimeError if no key or cx is configured.
+
+    Every retry and every successful call is appended to the metrics ledger
+    (`ref` only identifies the product in those events) -> cost_report() /
+    retry_report() read from there.
     """
     if not _API_KEY:
         raise RuntimeError("GOOGLE_CSE_API_KEYS no configurada en .env")
@@ -127,10 +133,14 @@ def cse_image_search(query: str, profile: str = "baseline", marca: str = "",
             resp = requests.get(CSE_ENDPOINT, params=params, timeout=30)
         except requests.RequestException as e:
             last_error = e
+            metrics.log_event("cse_retry", ref=ref, attempt=attempt + 1,
+                            error=str(e)[:80])
             time.sleep(2 ** attempt)
             continue
 
         if resp.status_code == 200:
+            metrics.log_event("cse_call", ref=ref, query=query, profile=profile,
+                            geo=geo, attempts=attempt + 1)
             return resp.json()
 
         # quota / forbidden -> fail fast
@@ -142,6 +152,8 @@ def cse_image_search(query: str, profile: str = "baseline", marca: str = "",
         # transient server error -> backoff and retry
         if resp.status_code >= 500:
             last_error = RuntimeError(f"{resp.status_code}: {resp.text[:200]}")
+            metrics.log_event("cse_retry", ref=ref, attempt=attempt + 1,
+                            error=f"HTTP {resp.status_code}")
             time.sleep(2 ** attempt)
             continue
 
@@ -186,7 +198,7 @@ def search_product(ref: str, marca: str, profile: str = "baseline",
         return candidates_from_response(raw)
 
     query = QUERY_RUNGS[rung](ref=ref, marca=marca, nombre_limpio=nombre_limpio)
-    raw = cse_image_search(query, profile=profile, marca=marca, geo=geo)
+    raw = cse_image_search(query, profile=profile, marca=marca, geo=geo, ref=ref)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(raw, ensure_ascii=False, indent=2))
@@ -207,6 +219,7 @@ def search_df(df, col_ref: str = "Ref Proveedor", col_marca: str = "Marca",
     results: dict[str, list[dict]] = {}
     n_calls = 0
     n_skipped = 0
+    errores: list[str] = []
     for _, row in df.iterrows():
         ref = row[col_ref]
         profile = row.get(col_profile, "baseline")
@@ -216,20 +229,29 @@ def search_df(df, col_ref: str = "Ref Proveedor", col_marca: str = "Marca",
             n_skipped += 1
             continue
 
-        results[ref] = search_product(
-            ref=ref,
-            marca=row[col_marca],
-            profile=profile,
-            nombre_limpio=row.get(col_nombre, ""),
-            rung=rung,
-            use_cache=use_cache,
-            geo=geo,
-        )
+        try:
+            results[ref] = search_product(
+                ref=ref,
+                marca=row[col_marca],
+                profile=profile,
+                nombre_limpio=row.get(col_nombre, ""),
+                rung=rung,
+                use_cache=use_cache,
+                geo=geo,
+            )
+        except (RuntimeError, requests.RequestException) as e:
+            # one product's failure (network blip, exhausted retries) must not
+            # kill the whole loop - nothing was cached for it, so re-running
+            # the cell retries it for free
+            errores.append(ref)
+            print(f"  {ref}: busqueda fallida, se reintenta en la proxima corrida ({str(e)[:80]})")
+            continue
         if not cached:
             n_calls += 1
             if sleep:
                 time.sleep(sleep)
 
     print(f"rung {rung}: {n_calls} queries nuevas a la API (cap {max_queries}), "
-        f"{len(results) - n_calls} desde cache, {n_skipped} omitidas por el cap")
+        f"{len(results) - n_calls} desde cache, {n_skipped} omitidas por el cap"
+        + (f", {len(errores)} con error: {errores}" if errores else ""))
     return results

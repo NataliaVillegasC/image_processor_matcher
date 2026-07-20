@@ -28,6 +28,8 @@ from google import genai
 from google.genai import errors, types
 from PIL import Image
 
+from pipeline import metrics
+
 CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "select"
 
 MODEL_FLASH = "gemini-2.5-flash"
@@ -72,9 +74,17 @@ the criteria below, then PICK the best one among those that pass the eliminatory
 ELIMINATORY CRITERIA (fail one and the image is discarded):
 1. PRODUCT: does the image show exactly this type of part? Check the quantity
     and presentation against the rule given. Count the visible units.
-2. BRAND: is there visible evidence of the required brand (logo on the part,
-    engraving, legible packaging)? If there's no visible evidence but also no
-    evidence of a different brand, mark it "no_verificable" instead of discarding it.
+2. BRAND: REQUIRED BRAND names the vehicle/automaker this part is cataloged
+    for. If the visible brand/logo belongs to a DIFFERENT AUTOMAKER or
+    dealership, mark "incorrecta". If it's some other brand/logo instead,
+    first check whether it matches or is consistent with PRODUCT or the other
+    data given (e.g. a tire's model name like "ENERGY XM2" IS a Michelin
+    line, so seeing "MICHELIN" on it CONFIRMS the product instead of
+    contradicting it) - in that case treat it as confirming evidence, marca
+    "verificada", not a mismatch. Only mark "incorrecta" when the brand shown
+    is a different automaker, or a brand with no connection at all to the
+    product described. If you can't confirm either way, mark "no_verificable"
+    instead of discarding it.
 
 QUALITY CRITERIA (score 0-10 each):
 - resolucion: apparent resolution and sharpness.
@@ -182,7 +192,23 @@ def fetch_full_image(url: str, timeout: int = 15, max_side: int = MAX_SIDE,
 
 # --- Gemini call with retry/backoff -----------------------------------------
 
-def _generate_with_retry(parts: list, model: str, max_retries: int = 4) -> dict:
+def _usage_dict(resp) -> dict:
+    """Token usage of one call, from resp.usage_metadata (fields can be None).
+    thoughts_tokens are the 2.5 thinking tokens - billed as OUTPUT, so
+    cost_report() adds them to output_tokens."""
+    um = getattr(resp, "usage_metadata", None)
+    return {
+        "prompt_tokens": getattr(um, "prompt_token_count", 0) or 0,
+        "output_tokens": getattr(um, "candidates_token_count", 0) or 0,
+        "thoughts_tokens": getattr(um, "thoughts_token_count", 0) or 0,
+        "total_tokens": getattr(um, "total_token_count", 0) or 0,
+    }
+
+
+def _generate_with_retry(parts: list, model: str, max_retries: int = 4,
+                        ref: str = "") -> tuple[dict, dict, int]:
+    """Returns (parsed_json, usage, attempts). Every retry and every
+    successful call is appended to the metrics ledger (see metrics.py)."""
     client = _client()
     config = types.GenerateContentConfig(
         response_mime_type="application/json", response_schema=SELECT_SCHEMA,
@@ -191,15 +217,22 @@ def _generate_with_retry(parts: list, model: str, max_retries: int = 4) -> dict:
     for attempt in range(max_retries):
         try:
             resp = client.models.generate_content(model=model, contents=parts, config=config)
-            return json.loads(resp.text)
+            usage = _usage_dict(resp)
+            metrics.log_event("gemini_call", ref=ref, model=model,
+                            attempts=attempt + 1, **usage)
+            return json.loads(resp.text), usage, attempt + 1
         except errors.ClientError as e:
             if getattr(e, "code", None) == 429:
                 last_error = e
+                metrics.log_event("gemini_retry", ref=ref, model=model,
+                                attempt=attempt + 1, error="HTTP 429")
                 time.sleep(2 ** attempt)
                 continue
             raise
         except errors.ServerError as e:
             last_error = e
+            metrics.log_event("gemini_retry", ref=ref, model=model,
+                            attempt=attempt + 1, error=str(e)[:80])
             time.sleep(2 ** attempt)
             continue
     raise RuntimeError(f"Gemini fallo tras {max_retries} intentos: {last_error}")
@@ -263,6 +296,7 @@ def _sin_candidatos(motivo: str) -> dict:
     return {
         "n_evaluadas": 0,
         "evaluaciones": [],
+        "candidatos_evaluados": [],
         "confianza": "baja",
         "comentario": motivo,
         "seleccion_imagen": None,
@@ -321,8 +355,18 @@ def select_product(ref: str, nombre_limpio: str, marca: str, categoria: str,
             parts = [prompt] + [
                 types.Part.from_bytes(data=b, mime_type="image/jpeg") for b in images
             ]
-            raw = _generate_with_retry(parts, model=model)
+            raw, usage, attempts = _generate_with_retry(parts, model=model, ref=ref)
             result = _postprocess(raw, usable)
+            # usage/model/attempts travel with the cached result so a re-run
+            # served from cache still knows what the original call cost.
+            result["modelo"] = model
+            result["usage"] = usage
+            result["intentos"] = attempts
+            # ordered links of the images Gemini actually saw: position i-1 is
+            # "Imagen i" in `evaluaciones`. Without this the fallback can't map
+            # a discarded image number back to a URL to exclude it (usable can
+            # differ from the prefilter's kept when a download fails).
+            result["candidatos_evaluados"] = [c.get("link", "") for c in usable]
             sel_n = result.get("seleccion_imagen")
             if sel_n is not None and via_thumb[sel_n - 1]:
                 result["flags"].append("descarga_thumbnail")
@@ -346,6 +390,7 @@ def select_df(df, filtrados: dict[str, dict], col_ref: str = "Ref Proveedor",
     results: dict[str, dict] = {}
     n_calls = 0
     n_skipped = 0
+    errores: list[str] = []
     for _, row in df.iterrows():
         ref = row[col_ref]
         kept = filtrados.get(ref, {}).get("kept", [])
@@ -355,21 +400,30 @@ def select_df(df, filtrados: dict[str, dict], col_ref: str = "Ref Proveedor",
             n_skipped += 1
             continue
 
-        results[ref] = select_product(
-            ref=ref,
-            nombre_limpio=row.get(col_nombre, ""),
-            marca=row[col_marca],
-            categoria=row.get(col_categoria, ""),
-            presentacion=row.get(col_presentacion, ""),
-            candidates=kept,
-            model=model,
-            use_cache=use_cache,
-        )
+        try:
+            results[ref] = select_product(
+                ref=ref,
+                nombre_limpio=row.get(col_nombre, ""),
+                marca=row[col_marca],
+                categoria=row.get(col_categoria, ""),
+                presentacion=row.get(col_presentacion, ""),
+                candidates=kept,
+                model=model,
+                use_cache=use_cache,
+            )
+        except (RuntimeError, errors.APIError, requests.RequestException) as e:
+            # one product's failure (network blip, exhausted retries) must not
+            # kill the whole loop - nothing was cached for it, so re-running
+            # the cell retries it for free
+            errores.append(ref)
+            print(f"  {ref}: seleccion fallida, se reintenta en la proxima corrida ({str(e)[:80]})")
+            continue
         if not cached:
             n_calls += 1
             if sleep:
                 time.sleep(sleep)
 
     print(f"select: {n_calls} llamadas nuevas a Gemini (cap {max_calls}), "
-        f"{len(results) - n_calls} desde cache, {n_skipped} omitidas por el cap")
+        f"{len(results) - n_calls} desde cache, {n_skipped} omitidas por el cap"
+        + (f", {len(errores)} con error: {errores}" if errores else ""))
     return results

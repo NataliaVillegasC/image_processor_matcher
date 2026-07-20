@@ -13,9 +13,11 @@ venv/
 
 # Credentials
 credentials.json
+*.json
 
 # CSE / image cache (raw API responses + downloaded images)
 cache/
 
 # Pipeline output (final xlsx + downloaded images)
 output/
+

@@ -115,12 +115,19 @@ def background_score(img: Image.Image, white_thr: float = 235) -> float:
 def score_candidates(candidates: list[dict]) -> list[dict]:
     """Fetch each thumbnail ONCE (in memory) and annotate `bg_score` and
     `_phash`. Candidates whose thumbnail can't be fetched get bg_score=0 and
-    _phash=None (not dropped here -> the hard filter already passed)."""
+    _phash=None (not dropped here -> the hard filter already passed).
+
+    Annotates COPIES: the caller's dicts are never mutated. `_phash` is an
+    ImageHash object -> leaking it into the caller's pool makes that pool
+    non-JSON-serializable (fallback.py caches the pool to disk)."""
+    out = []
     for c in candidates:
+        c = dict(c)
         img = fetch_thumbnail(c.get("thumbnailLink", ""))
         c["bg_score"] = background_score(img) if img else 0.0
         c["_phash"] = imagehash.phash(img) if img else None
-    return candidates
+        out.append(c)
+    return out
 
 
 def dedupe_by_hash(candidates: list[dict], max_distance: int = HASH_MAX_DISTANCE

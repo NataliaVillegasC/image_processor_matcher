@@ -29,6 +29,7 @@ from google.genai import errors, types
 from PIL import Image
 
 from pipeline import metrics
+from pipeline.search import build_query
 
 CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "select"
 
@@ -319,17 +320,24 @@ def _cache_path(ref: str) -> Path:
 
 def select_product(ref: str, nombre_limpio: str, marca: str, categoria: str,
                 presentacion: str, candidates: list[dict], model: str = MODEL_FLASH,
-                use_cache: bool = True) -> dict:
+                use_cache: bool = True, rung: int = 1, query: str = "") -> dict:
     """Full Etapa 5 pipeline for one product's pre-filtered candidate pool.
 
     Returns (and caches to cache/select/{ref}.json) the resolved selection,
     ranking, confidence, and edge-case flags. `candidates` is the `kept` list
     from `prefilter.prefilter_product`.
+
+    `rung`/`query` are metadata: which CSE try (1/2/3) and the literal
+    query string produced this pool. They're recorded on the result so the final
+    output can show which search fed each selection (the stakeholder wants the
+    metadata visible). `pasadas_gemini` counts the Gemini selection passes this
+    result represents - 1 here for a real call, accumulated by the fallback.
     """
     path = _cache_path(ref)
     if use_cache and path.exists():
         return json.loads(path.read_text())
 
+    pasada = 0
     if not candidates:
         result = _sin_candidatos("pool vacio tras el pre-filtro")
     else:
@@ -370,6 +378,13 @@ def select_product(ref: str, nombre_limpio: str, marca: str, categoria: str,
             sel_n = result.get("seleccion_imagen")
             if sel_n is not None and via_thumb[sel_n - 1]:
                 result["flags"].append("descarga_thumbnail")
+            pasada = 1
+
+    # Metadata: which CSE try (rung + literal query) fed this selection, and
+    # how many Gemini passes it took (accumulated by the fallback across rungs).
+    result["intento_cse"] = rung
+    result["query_cse"] = query
+    result["pasadas_gemini"] = pasada
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2))
@@ -410,6 +425,8 @@ def select_df(df, filtrados: dict[str, dict], col_ref: str = "Ref Proveedor",
                 candidates=kept,
                 model=model,
                 use_cache=use_cache,
+                rung=1,  # Etapa 5 always runs rung 1; the fallback walks 2-3
+                query=build_query(1, ref=ref, marca=row[col_marca]),
             )
         except (RuntimeError, errors.APIError, requests.RequestException) as e:
             # one product's failure (network blip, exhausted retries) must not

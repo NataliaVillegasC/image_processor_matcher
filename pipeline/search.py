@@ -34,10 +34,6 @@ CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "cse"
 # como opt-in (geo=True) para volver a probarlo caso por caso.
 GEO_PARAMS = {"gl": "co", "hl": "es"}
 
-# Una sola clave para el MVP.
-_API_KEY = os.getenv("GOOGLE_CSE_API_KEYS", "")
-_CX = os.getenv("GOOGLE_CSE_CX", "")
-
 
 # --- Query builders (the fallback ladder, plan.md Etapa 3) -----------------
 # Only rung 1 is used by default. Lower rungs degrade filter strength step by
@@ -60,6 +56,15 @@ def query_rung3(nombre_limpio: str, **_) -> str:
 
 
 QUERY_RUNGS = {1: query_rung1, 2: query_rung2, 3: query_rung3}
+
+
+def build_query(rung: int, ref: str = "", marca: str = "", nombre_limpio: str = "") -> str:
+    """The literal query string a given rung would send to the CSE.
+
+    Same builders `search_product` uses internally, exposed so Etapas 5/5b can
+    record WHICH query fed each selection as result metadata (plan.md: the
+    stakeholder wants to see the CSE try + query in the final output)."""
+    return QUERY_RUNGS[rung](ref=ref, marca=marca, nombre_limpio=nombre_limpio)
 
 
 # --- CSE profile -> image params -------------------------------------------
@@ -111,14 +116,18 @@ def cse_image_search(query: str, profile: str = "baseline", marca: str = "",
     (`ref` only identifies the product in those events) -> cost_report() /
     retry_report() read from there.
     """
-    if not _API_KEY:
+    # Read at call time (not frozen at import) so callers can load the .env
+    # first — e.g. run_pipeline.preflight() resolves and loads it before use.
+    api_key = os.getenv("GOOGLE_CSE_API_KEYS", "")
+    cx = os.getenv("GOOGLE_CSE_CX", "")
+    if not api_key:
         raise RuntimeError("GOOGLE_CSE_API_KEYS no configurada en .env")
-    if not _CX:
+    if not cx:
         raise RuntimeError("GOOGLE_CSE_CX no configurada en .env")
 
     params = {
-        "cx": _CX,
-        "key": _API_KEY,
+        "cx": cx,
+        "key": api_key,
         "q": query,
         "searchType": "image",
         "num": num,

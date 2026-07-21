@@ -34,7 +34,7 @@ from google.genai import errors
 
 from pipeline.prefilter import prefilter_product
 from pipeline.search import _cache_path as _search_cache_path
-from pipeline.search import search_product
+from pipeline.search import build_query, search_product
 from pipeline.select import MODEL_FLASH, select_product
 
 CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "fallback"
@@ -138,6 +138,13 @@ def escalate_df(df, resultados: dict, filtrados: dict, seleccionados: dict,
         pool = list(resultados.get(ref, []))
         ref_log: list[dict] = []
         result = seleccionados.get(ref)
+        # Gemini passes so far (Etapa 5 = 1, or 0 if it never got a pool) -> the
+        # fallback adds one per rung it actually re-judges, so the final result
+        # shows the total effort. `ultimo_intento` remembers the last rung whose
+        # CSE was actually queried -> used to stamp the no-result case with the
+        # last try attempted (the rung that resolved it is stamped by select_product).
+        pasadas = result.get("pasadas_gemini", 0) if result else 0
+        ultimo_intento: tuple[int, str] | None = None
         # blacklist of links Gemini already condemned (wrong product / wrong
         # brand) -> excluded from every retry below, and grown after each new
         # verdict. Only excluded from the pool sent forward, NEVER deleted
@@ -152,12 +159,17 @@ def escalate_df(df, resultados: dict, filtrados: dict, seleccionados: dict,
                     ref_log.append({"ref": ref, "rung": rung, "resultado": "omitido_cap_cse"})
                     break
 
+                query_rung = build_query(
+                    rung, ref=ref, marca=row[col_marca],
+                    nombre_limpio=row.get(col_nombre, ""),
+                )
                 nuevos = search_product(
                     ref=ref, marca=row[col_marca], profile=profile,
                     nombre_limpio=row.get(col_nombre, ""), rung=rung,
                 )
                 if not cse_cached:
                     n_queries += 1
+                ultimo_intento = (rung, query_rung)
 
                 antes = sum(1 for c in pool if c.get("link") not in excluidas)
                 pool = _merge_pools(pool, nuevos)
@@ -190,8 +202,13 @@ def escalate_df(df, resultados: dict, filtrados: dict, seleccionados: dict,
                     categoria=row.get(col_categoria, ""),
                     presentacion=row.get(col_presentacion, ""),
                     candidates=prefiltrado["kept"], model=model, use_cache=False,
+                    rung=rung, query=query_rung,
                 )
                 n_calls += 1
+                # this rung ran a real Gemini pass -> add it to the running total
+                # (select_product only knows its own single pass)
+                pasadas += 1
+                result["pasadas_gemini"] = pasadas
                 if sleep:
                     time.sleep(sleep)
 
@@ -219,6 +236,14 @@ def escalate_df(df, resultados: dict, filtrados: dict, seleccionados: dict,
             ref_log.append({"ref": ref, "rung": rung, "resultado": "error_red",
                             "flags": str(e)[:80]})
             print(f"  {ref}: rung {rung} fallo, se reintenta en la proxima corrida ({str(e)[:80]})")
+
+        # no-result products: the last rung whose Gemini pass ran already stamped
+        # intento_cse/query_cse, but a rung that brought nothing new (or an empty
+        # prefilter) never reached select_product -> stamp the last rung actually
+        # queried so the output reflects that the ladder was exhausted.
+        if result is not None and ultimo_intento is not None and needs_fallback(result):
+            result["intento_cse"], result["query_cse"] = ultimo_intento
+            seleccionados[ref] = result
 
         log.extend(ref_log)
         # cache the escalated state only if a Gemini call actually ran AND no

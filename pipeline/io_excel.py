@@ -98,6 +98,14 @@ def build_output_df(df: pd.DataFrame, seleccionados: dict[str, dict],
             "categoria": row.get("categoria", ""),
             "termino_busqueda": row.get("termino_busqueda", ""),
             "perfil_cse_usado": row.get("cse_profile", ""),
+            # Metadata: which CSE try (rung 1=literal, 2=ref+marca,
+            # 3=nombre_limpio) and literal query fed the selection, how many
+            # Gemini selection passes it took, and the API retries of the last
+            # Gemini call. Empty for rows Etapa 5 never reached.
+            "intento_cse": r.get("intento_cse", ""),
+            "query_cse": r.get("query_cse", ""),
+            "pasadas_gemini": r.get("pasadas_gemini", ""),
+            "reintentos_api_gemini": r.get("intentos", ""),
             "confianza": r.get("confianza", ""),
             "flags": ", ".join(r.get("flags", [])),
             "razon_gemini": r.get("comentario", ""),

@@ -10,16 +10,28 @@ venv/
 *.env.*
 *.env_*
 .env_*
+# ...but keep the template committed so others know what to fill in
+!.env.example
 
 # Credentials
 credentials.json
 *.json
+# ...but keep the template committed so others know what to fill in
+!credentials.json.example
 
 # CSE / image cache (raw API responses + downloaded images)
 cache/
 cache_full/
+cache_prod/
+cache_val/
 
 # Pipeline output (final xlsx + downloaded images)
 output/
 output_full/
+output_prod/
+output_val/
 
+# Photos
+*.jpg
+*.jpeg
+*.png

@@ -57,20 +57,95 @@ def _domain_blocked(domain: str) -> bool:
     return any(bad in domain for bad in BLOCKLIST)
 
 
+def _is_invalid_url(url: str) -> bool:
+    """CSE occasionally hands back a browser-internal placeholder (seen for
+    some AVIF/HEIC sources) instead of a real fetchable URL. Nothing
+    downstream can ever load these -> flag them distinctly instead of
+    letting them masquerade as a resolution problem."""
+    return not (url or "").startswith(("http://", "https://"))
+
+
+# --- CDN/CMS thumbnail workarounds ------------------------------------------
+#
+# Several sources report the dimensions of an auto-generated small crop, not
+# the real photo -> the "resolucion_baja" check ends up measuring a thumbnail
+# and dropping a perfectly good image. Both patterns below were confirmed by
+# hand against live URLs before being encoded here (see prefilter audit for
+# ref 7711649209): mlstatic.com's own "-O" (original) size is *not* its
+# largest -> "-F" routinely is; WordPress uploads keep the untouched original
+# at the same path with the auto-generated "-WxH" suffix stripped.
+
+def _mlstatic_upscale(url: str) -> str | None:
+    if "mlstatic.com" not in url:
+        return None
+    new = re.sub(r"-[A-Za-z](\.\w+)$", r"-F\1", url)
+    return new if new != url else None
+
+
+def _wordpress_upscale(url: str) -> str | None:
+    if "wp-content/uploads" not in url:
+        return None
+    new = re.sub(r"-\d+x\d+(?=\.\w+$)", "", url)
+    return new if new != url else None
+
+
+UPSCALE_STRATEGIES = (_mlstatic_upscale, _wordpress_upscale)
+
+
+def try_recover_resolution(candidate: dict, min_side: int, max_ratio: float,
+                            timeout: int = 10) -> dict | None:
+    """A candidate failed the resolution check on its reported link -> try
+    known CDN/CMS URL rewrites and re-measure the actual image they point
+    to. Returns an updated copy (corrected link/width/height) if a rewrite
+    clears both the resolution floor and the aspect-ratio ceiling, else
+    None (caller drops the original as before)."""
+    link = candidate.get("link", "")
+    for strategy in UPSCALE_STRATEGIES:
+        new_link = strategy(link)
+        if not new_link:
+            continue
+        img = fetch_thumbnail(new_link, timeout=timeout)
+        if img is None:
+            continue
+        w, h = img.size
+        if min(w, h) < min_side:
+            continue
+        if max(w, h) / max(min(w, h), 1) > max_ratio:
+            continue
+        fixed = dict(candidate)
+        fixed["link"] = new_link
+        fixed["width"], fixed["height"] = w, h
+        return fixed
+    return None
+
+
 def apply_hard_filters(candidates: list[dict], min_side: int = MIN_SIDE,
                     max_ratio: float = MAX_ASPECT_RATIO
                     ) -> tuple[list[dict], list[tuple[dict, str]]]:
     """Low resolution, extreme aspect ratio, blocklisted domain.
+
+    Before dropping something purely for low resolution, tries the known
+    CDN/CMS thumbnail-URL rewrites in `try_recover_resolution` -> a real,
+    full-size photo often sits one URL edit away from the thumbnail CSE
+    handed us (see prefilter audit for ref 7711649209).
 
     Each drop keeps its reason so it can be audited later -> same pattern as
     coverage_report in categorize.py.
     """
     kept, dropped = [], []
     for c in candidates:
+        link = c.get("link", "")
+        if _is_invalid_url(link):
+            dropped.append((c, f"url_invalido {link[:40]}"))
+            continue
         w, h = c.get("width") or 0, c.get("height") or 0
         domain = c.get("displayLink", "")
         if min(w, h) < min_side:
-            dropped.append((c, f"resolucion_baja {w}x{h}"))
+            recovered = try_recover_resolution(c, min_side, max_ratio)
+            if recovered is not None:
+                kept.append(recovered)
+            else:
+                dropped.append((c, f"resolucion_baja {w}x{h}"))
         elif max(w, h) / max(min(w, h), 1) > max_ratio:
             dropped.append((c, f"aspect_ratio_extremo {w}x{h}"))
         elif _domain_blocked(domain):

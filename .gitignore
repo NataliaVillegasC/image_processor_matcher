@@ -17,7 +17,9 @@ credentials.json
 
 # CSE / image cache (raw API responses + downloaded images)
 cache/
+cache_full/
 
 # Pipeline output (final xlsx + downloaded images)
 output/
+output_full/
 

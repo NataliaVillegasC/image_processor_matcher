@@ -98,8 +98,7 @@ def build_output_df(df: pd.DataFrame, seleccionados: dict[str, dict],
             "categoria": row.get("categoria", ""),
             "termino_busqueda": row.get("termino_busqueda", ""),
             "perfil_cse_usado": row.get("cse_profile", ""),
-            # Metadata: which CSE try (rung 1=literal, 2=ref+marca,
-            # 3=nombre_limpio) and literal query fed the selection, how many
+            # Metadata: which CSE try and literal query fed the selection, how many
             # Gemini selection passes it took, and the API retries of the last
             # Gemini call. Empty for rows Etapa 5 never reached.
             "intento_cse": r.get("intento_cse", ""),
@@ -117,10 +116,15 @@ def build_output_df(df: pd.DataFrame, seleccionados: dict[str, dict],
 # --- Write .xlsx + embed thumbnails ------------------------------------------
 
 def write_excel(out_df: pd.DataFrame, path: Path, col_imagen_local: str = "imagen_local",
-            embed_images: bool = True, thumb_side: int = THUMB_SIDE) -> Path:
+            embed_images: bool = True, thumb_side: int = THUMB_SIDE,
+            keep_local_paths: bool = True) -> Path:
     """Write `out_df` to `path`, then (if `embed_images`) reopen it with
     openpyxl and drop a real thumbnail into a new `miniatura` column for every
     row whose `imagen_local` points at a file on disk.
+
+    `keep_local_paths=False` blanks the `imagen_local` column after embedding
+    the thumbnails: use it when the downloaded image files are temporary and
+    get deleted right after this call, so the Excel never shows dead paths.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -155,6 +159,12 @@ def write_excel(out_df: pd.DataFrame, path: Path, col_imagen_local: str = "image
         ws.add_image(XLImage(buf), f"{thumb_col_letter}{row_i}")
         ws.row_dimensions[row_i].height = thumb_side * 0.75
         n_embedded += 1
+
+    # The image files were temporary and are about to be deleted -> blank the
+    # path column so the sheet doesn't point at files that no longer exist.
+    if not keep_local_paths:
+        for row_i in range(2, ws.max_row + 1):
+            ws.cell(row=row_i, column=col_idx, value="")
 
     wb.save(path)
     print(f"excel: {path} ({ws.max_row - 1} filas, {n_embedded} miniaturas incrustadas)")

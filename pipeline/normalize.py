@@ -97,7 +97,7 @@ def normalize_row(nombre: str, marca: str) -> dict:
 
     # has a case-pack expression (PACK_RE) but no confirmed litraje to anchor
     # the strip to -> left untouched in nombre_limpio, needs manual review
-    # (e.g. "4X4 UNID" - is that a mistyped "4LX4UND"? "3X5"/"6X1" - unknown unit).
+    # (e.g. "4X4 UNID" - could be a mistyped "4LX4UND"?).
     pack_ambiguo = bool(pack) and not litraje
 
     return {

@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -112,10 +114,11 @@ def wire_cache_and_output(cache_root: Path, output_root: Path) -> None:
     select_mod.CACHE_DIR = cache_root / "select"
     fallback_mod.CACHE_DIR = cache_root / "fallback"
     metrics_mod.LEDGER = cache_root / "metrics" / "events.jsonl"
-    io_excel_mod.IMG_DIR = output_root / "images"
+    # io_excel_mod.IMG_DIR is set later in Stage 6: a permanent folder when
+    # --keep-images is given, otherwise a temp folder that gets cleaned up.
 
     for d in [search_mod.CACHE_DIR, prefilter_mod.CACHE_DIR, select_mod.CACHE_DIR,
-            fallback_mod.CACHE_DIR, metrics_mod.LEDGER.parent, io_excel_mod.IMG_DIR]:
+            fallback_mod.CACHE_DIR, metrics_mod.LEDGER.parent]:
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -156,6 +159,11 @@ def main() -> int:
                         help="Cap on NEW Gemini calls this run (default: no cap).")
     parser.add_argument("--rung", type=int, default=1,
                         help="Initial CSE query style: 1='ref' 'brand' (recommended).")
+    parser.add_argument("--keep-images", action="store_true",
+                        help="Also save the full-size chosen images to "
+                            "<output-dir>/images/. By default only the Excel is "
+                            "produced (thumbnails are embedded in it) and no loose "
+                            "image files are left on disk.")
     args = parser.parse_args()
 
     log("Checking credentials and input file...")
@@ -199,10 +207,25 @@ def main() -> int:
                 max_queries=max_queries, max_calls=max_calls)
 
     # --- Stage 6: write Excel ---
-    log("Stage 6: downloading chosen images and writing the Excel file...")
-    out_df = build_output_df(df, seleccionados)
+    # The chosen images must be on disk to embed them as thumbnails. By default
+    # we download them to a TEMP folder, embed, and delete it -> the operator's
+    # machine is left with just the Excel. --keep-images saves them for real.
     out_xlsx = output_root / "catalogo_final.xlsx"
-    write_excel(out_df, out_xlsx)
+    if args.keep_images:
+        log("Stage 6: downloading chosen images (kept in <output>/images/) and writing the Excel file...")
+        io_excel_mod.IMG_DIR = output_root / "images"
+        io_excel_mod.IMG_DIR.mkdir(parents=True, exist_ok=True)
+        out_df = build_output_df(df, seleccionados)
+        write_excel(out_df, out_xlsx, keep_local_paths=True)
+    else:
+        log("Stage 6: embedding thumbnails into the Excel (no image files kept on disk)...")
+        tmp_img_dir = Path(tempfile.mkdtemp(prefix="donrep_img_"))
+        io_excel_mod.IMG_DIR = tmp_img_dir
+        try:
+            out_df = build_output_df(df, seleccionados)
+            write_excel(out_df, out_xlsx, keep_local_paths=False)
+        finally:
+            shutil.rmtree(tmp_img_dir, ignore_errors=True)
 
     # --- Summary ---
     log("Done. Summary:")

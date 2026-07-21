@@ -12,8 +12,6 @@ Three reports:
                         seleccionada) + success rate / confianza / flags.
 
 Prices are list-price constants (USD) - adjust here if Google changes them.
-Note: select results cached BEFORE this instrumentation carry no token counts;
-to backfill, delete cache/select and re-run (the Gemini call is paid again).
 """
 import json
 from datetime import datetime, timezone

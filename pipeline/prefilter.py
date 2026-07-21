@@ -69,11 +69,7 @@ def _is_invalid_url(url: str) -> bool:
 #
 # Several sources report the dimensions of an auto-generated small crop, not
 # the real photo -> the "resolucion_baja" check ends up measuring a thumbnail
-# and dropping a perfectly good image. Both patterns below were confirmed by
-# hand against live URLs before being encoded here (see prefilter audit for
-# ref 7711649209): mlstatic.com's own "-O" (original) size is *not* its
-# largest -> "-F" routinely is; WordPress uploads keep the untouched original
-# at the same path with the auto-generated "-WxH" suffix stripped.
+# and dropping a perfectly good image.
 
 def _mlstatic_upscale(url: str) -> str | None:
     if "mlstatic.com" not in url:
@@ -127,7 +123,7 @@ def apply_hard_filters(candidates: list[dict], min_side: int = MIN_SIDE,
     Before dropping something purely for low resolution, tries the known
     CDN/CMS thumbnail-URL rewrites in `try_recover_resolution` -> a real,
     full-size photo often sits one URL edit away from the thumbnail CSE
-    handed us (see prefilter audit for ref 7711649209).
+    handed.
 
     Each drop keeps its reason so it can be audited later -> same pattern as
     coverage_report in categorize.py.

@@ -1,7 +1,7 @@
 """Etapa 1 - name normalization.
 
 Produces the minimal search term per product, plus structured columns
-extracted (not deleted) from the name. See plan.md Etapa 1.
+extracted (not deleted) from the name.
 """
 import unicodedata
 

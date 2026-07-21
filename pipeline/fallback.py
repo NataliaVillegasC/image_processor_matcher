@@ -231,7 +231,7 @@ def escalate_df(df, resultados: dict, filtrados: dict, seleccionados: dict,
                 excluidas |= _condenadas(result)
         except (RuntimeError, errors.APIError, requests.RequestException) as e:
             # one product's failure (network blip, exhausted retries) must not
-            # kill the whole escalation - log it and move to the next ref. No
+            # kill the whole escalation, log it and move to the next ref. No
             # fallback cache is written below, so the next run retries it.
             ref_log.append({"ref": ref, "rung": rung, "resultado": "error_red",
                             "flags": str(e)[:80]})
@@ -247,7 +247,7 @@ def escalate_df(df, resultados: dict, filtrados: dict, seleccionados: dict,
 
         log.extend(ref_log)
         # cache the escalated state only if a Gemini call actually ran AND no
-        # error cut the ladder short - a ref cut by the caps or by the network
+        # error cut the ladder short, a ref cut by the caps or by the network
         # must stay re-attemptable on the next run
         hubo_error = any(a.get("resultado") == "error_red" for a in ref_log)
         if not hubo_error and any(a.get("resultado") in ("resuelto", "sigue_pendiente") for a in ref_log):

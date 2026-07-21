@@ -1,8 +1,7 @@
 """Etapa 6 - Excel output.
 
 Joins the original catalog with the Etapa 5 results (`seleccionados`) into one
-DataFrame, downloads the winning image for each row to disk (needed to embed
-it - Gemini's fetches in select.py are in-memory only and never saved), and
+DataFrame, downloads the winning image for each row to disk, and
 writes an .xlsx with an extra `miniatura` column holding the actual thumbnail
 image via openpyxl, so a reviewer can eyeball the whole catalog without
 opening a single URL.

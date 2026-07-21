@@ -2,16 +2,15 @@
 
 One call per product to control cost. The RAW CSE response is always saved to
 `cache/cse/{ref}/rung{n}_{profile}[_geo].json` so re-runs of the rest of the
-pipeline cost zero (the single most important cost decision of the MVP - see
-plan.md Etapa 3). The filename encodes profile/geo because they change the
-actual API params sent - without that, switching either would silently serve
-a cached response fetched under different params.
+pipeline cost zero (the single most important cost decision of the MVP).
+The filename encodes profile/geo because they change the
+actual API params sent.
 
 Rung 1 (`"{ref}" "{marca}"`, both quoted) is the default and the most precise
 query: it's the proven builder. The lower rungs of the fallback ladder are
 defined here as functions so Etapas 4/5 can wire the escalation later, but this
-module does NOT auto-advance rungs on its own - advancing is driven by a poor
-pool after the pre-filter or a null Gemini selection, which don't exist yet.
+module does NOT auto-advance rungs on its own -> advancing is driven by a poor
+pool after the pre-filter or a null Gemini selection.
 """
 import json
 import os
@@ -29,13 +28,12 @@ load_dotenv()
 CSE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 CACHE_DIR = Path(__file__).resolve().parent.parent / "cache" / "cse"
 
-# Market bias: Colombia / Spanish. Off by default (plan.md): probado con
-# "8550504748" "MOTRIO" -> 0 resultados con gl=co&hl=es, 7 sin geo. Se deja
+# Market bias: Colombia / Spanish. Se deja
 # como opt-in (geo=True) para volver a probarlo caso por caso.
 GEO_PARAMS = {"gl": "co", "hl": "es"}
 
 
-# --- Query builders (the fallback ladder, plan.md Etapa 3) -----------------
+# --- Query builders (the fallback ladder) -----------------
 # Only rung 1 is used by default. Lower rungs degrade filter strength step by
 # step (most precise -> most lax) and are called by the escalation logic later.
 
@@ -45,8 +43,7 @@ def query_rung1(ref: str, marca: str, **_) -> str:
 
 
 def query_rung2(ref: str, marca: str, **_) -> str:
-    """`{ref} {marca}` -> unquoted. Rescues brands written differently (motrio,
-    "Motrio by Renault") that the exact-phrase rung 1 would miss."""
+    """`{ref} {marca}` -> unquoted. Rescues brands written differently."""
     return f"{ref} {marca}"
 
 
@@ -62,15 +59,13 @@ def build_query(rung: int, ref: str = "", marca: str = "", nombre_limpio: str = 
     """The literal query string a given rung would send to the CSE.
 
     Same builders `search_product` uses internally, exposed so Etapas 5/5b can
-    record WHICH query fed each selection as result metadata (plan.md: the
-    stakeholder wants to see the CSE try + query in the final output)."""
+    record WHICH query fed each selection as result metadata."""
     return QUERY_RUNGS[rung](ref=ref, marca=marca, nombre_limpio=nombre_limpio)
 
 
 # --- CSE profile -> image params -------------------------------------------
 # baseline stays minimal on purpose: imgType=photo (set unconditionally in
-# cse_image_search) and the literal query, nothing else - imgSize=large was
-# cutting results (see GEO_PARAMS note above for the same lesson with geo).
+# cse_image_search) and the literal query, nothing else.
 # Each category's cse_profile then adds its own bias on top of that minimal
 # base. `exact_brand` needs the brand at call time, so it's applied here.
 
@@ -109,15 +104,13 @@ def cse_image_search(query: str, profile: str = "baseline", marca: str = "",
                     max_retries: int = 4, ref: str = "") -> dict:
     """One raw CSE image search. Returns the parsed JSON dict.
 
-    Backs off and retries on transient 5xx. Fails fast on quota/forbidden
+    Backs off and retries on transient 5b. Fails fast on quota/forbidden
     (429/403). Raises RuntimeError if no key or cx is configured.
 
     Every retry and every successful call is appended to the metrics ledger
-    (`ref` only identifies the product in those events) -> cost_report() /
-    retry_report() read from there.
     """
     # Read at call time (not frozen at import) so callers can load the .env
-    # first — e.g. run_pipeline.preflight() resolves and loads it before use.
+
     api_key = os.getenv("GOOGLE_CSE_API_KEYS", "")
     cx = os.getenv("GOOGLE_CSE_CX", "")
     if not api_key:
@@ -198,7 +191,7 @@ def search_product(ref: str, marca: str, profile: str = "baseline",
                 use_cache: bool = True, geo: bool = False) -> list[dict]:
     """Cached CSE search for one product at a given rung.
 
-    Reads `cache/cse/{ref}/rung{n}_{profile}[_geo].json` if present; otherwise
+    Reads `cache/cse/{ref}/rung{n}_{profile}.json` if present; otherwise
     calls the API and writes the RAW response there. Returns parsed candidates.
     """
     path = _cache_path(ref, rung, profile, geo)
@@ -217,12 +210,14 @@ def search_product(ref: str, marca: str, profile: str = "baseline",
 def search_df(df, col_ref: str = "Ref Proveedor", col_marca: str = "Marca",
             col_profile: str = "cse_profile", col_nombre: str = "nombre_limpio",
             rung: int = 1, use_cache: bool = True, geo: bool = False,
-            sleep: float = 0.5, max_queries: int = 40) -> dict[str, list[dict]]:
+            sleep: float = 0.5, max_queries: int | None = 40) -> dict[str, list[dict]]:
     """Run search_product over every row (use on the golden set first).
 
     `max_queries` caps NEW (uncached) API calls to protect the free daily budget
     (100/day). Cached rows are always served; once the cap is reached, remaining
     uncached rows are skipped (not in the result) instead of spending queries.
+    Pass `max_queries=None` to run every row with no cap (use this on a paid
+    CSE account / full run over the whole Excel).
     Returns {ref: [candidates]}. Sleeps between uncached calls only.
     """
     results: dict[str, list[dict]] = {}
@@ -234,7 +229,7 @@ def search_df(df, col_ref: str = "Ref Proveedor", col_marca: str = "Marca",
         profile = row.get(col_profile, "baseline")
         cached = use_cache and _cache_path(ref, rung, profile, geo).exists()
 
-        if not cached and n_calls >= max_queries:
+        if not cached and max_queries is not None and n_calls >= max_queries:
             n_skipped += 1
             continue
 
@@ -249,9 +244,8 @@ def search_df(df, col_ref: str = "Ref Proveedor", col_marca: str = "Marca",
                 geo=geo,
             )
         except (RuntimeError, requests.RequestException) as e:
-            # one product's failure (network blip, exhausted retries) must not
-            # kill the whole loop - nothing was cached for it, so re-running
-            # the cell retries it for free
+            # one product's failure must not kill the whole loop.
+
             errores.append(ref)
             print(f"  {ref}: busqueda fallida, se reintenta en la proxima corrida ({str(e)[:80]})")
             continue
@@ -260,7 +254,8 @@ def search_df(df, col_ref: str = "Ref Proveedor", col_marca: str = "Marca",
             if sleep:
                 time.sleep(sleep)
 
-    print(f"rung {rung}: {n_calls} queries nuevas a la API (cap {max_queries}), "
+    cap_txt = "sin cap" if max_queries is None else f"cap {max_queries}"
+    print(f"rung {rung}: {n_calls} queries nuevas a la API ({cap_txt}), "
         f"{len(results) - n_calls} desde cache, {n_skipped} omitidas por el cap"
         + (f", {len(errores)} con error: {errores}" if errores else ""))
     return results

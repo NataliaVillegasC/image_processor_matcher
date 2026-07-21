@@ -1,8 +1,8 @@
 """Etapa 2 - keyword-first category classifier.
 
 First-match-wins over config.categories.CATEGORIAS (order matters there).
-Anything unmatched lands in `otros` and is surfaced by coverage_report — that
-list is the backlog for new rules.
+Anything unmatched lands in `otros` and is surfaced by coverage_report, which becomes
+the backlog for new rules.
 """
 import re
 import pandas as pd

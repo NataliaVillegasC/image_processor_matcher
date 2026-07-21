@@ -10,7 +10,7 @@ acts on that pick for the edge cases (see `_postprocess`).
 
 Default model: Flash (cheap, the task is discrimination not generation).
 `MODEL_PRO` is declared for the two-tier routing (low
-confidence -> Pro) but that auto-routing is NOT implemented here - call with
+confidence -> Pro) but that auto-routing is NOT implemented here, call with
 `model=MODEL_PRO` explicitly when that's decided.
 
 Images ARE downloaded in full here because Gemini needs the real bytes; they're re-encoded to JPEG
@@ -58,9 +58,9 @@ def _client() -> genai.Client:
     return _CLIENT
 
 
-# --- Prompt (template, plan.md Etapa 5) -------------------------------------
+# --- Prompt -------------------------------------
 # The fields interpolated in are the catalog's own Spanish data (product name,
-# category, presentation rule) - that's expected and fine to mix.
+# category, presentation rule).
 
 PROMPT_TEMPLATE = """You are an image verifier for an auto-parts catalog.
 
@@ -430,7 +430,7 @@ def select_df(df, filtrados: dict[str, dict], col_ref: str = "Ref Proveedor",
             )
         except (RuntimeError, errors.APIError, requests.RequestException) as e:
             # one product's failure (network blip, exhausted retries) must not
-            # kill the whole loop - nothing was cached for it, so re-running
+            # kill the whole loop. Nothing was cached for it, so re-running
             # the cell retries it for free
             errores.append(ref)
             print(f"  {ref}: seleccion fallida, se reintenta en la proxima corrida ({str(e)[:80]})")

@@ -3,7 +3,6 @@ Car-parts image pipeline
 Phase 1: Google CSE image extraction (with caching)
 Phase 2: cheap filtering + Gemini ranking
 
-Run cell-by-cell in Jupyter (use # %% markers) or as a script.
 Requires: requests pandas openpyxl python-dotenv pillow imagehash numpy google-genai
 """
 

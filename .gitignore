@@ -35,3 +35,9 @@ output_val/
 *.jpg
 *.jpeg
 *.png
+
+# Jupyter notebooks (not tracked per team preference)
+*.ipynb
+
+# Planning doc (kept local; README is the shared reference)
+plan.md

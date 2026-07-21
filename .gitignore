@@ -42,3 +42,7 @@ output_val/
 # Planning doc (kept local; README is the shared reference)
 plan.md
 *.DS_Store
+
+# Python bytecode cache
+__pycache__/
+*.pyc

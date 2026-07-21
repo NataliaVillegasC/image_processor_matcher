@@ -41,4 +41,4 @@ output_val/
 
 # Planning doc (kept local; README is the shared reference)
 plan.md
-.DS_Store
+*.DS_Store
